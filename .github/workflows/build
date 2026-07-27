@@ -1,0 +1,61 @@
+name: Build SQLite Compressions Extension
+on: [workflow_dispatch] 
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false 
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      # 1. 安裝 Rust 穩定的工具鏈
+      - uses: dtolnay/rust-toolchain@stable
+
+      # 2. 安裝官方自動化編譯工具 `just`
+      - name: Install Just Runner
+        uses: taiki-e/install-action@just
+
+      # 3. 解決 Linux 環境依賴（在 Ubuntu 編譯動態庫必備）
+      - name: Install SQLite Dev Libraries (Linux Only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+
+      # 4. 透過專案官方的 `justfile` 進行跨平台標準安全編譯
+      # 這會自動處理 Windows 與 Unix 的特徵旗標與條件編譯
+      - name: Build Loadable Extension via Just
+        run: just build
+
+      # 5. 🛠️ 產物位置除錯（可選，讓您在日誌中直接確認檔案被搬去哪）
+      - name: Debug Find Ext Files
+        shell: bash
+        run: |
+          echo "=== Searching for compiled extensions in repository ==="
+          find . -name "*.so" -o -name "*.dylib" -o -name "*.dll" | grep -v "target/release/deps" || echo "No files found via find"
+
+      # 6. ✨ 全專案盲搜上傳機制
+      # 100% 抓取由 just build 搬運到新目錄的 .so, .dylib, .dll 檔案，並自動排除快取雜物
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-compressions-${{ matrix.platform }}
+          path: |
+            **/*.dll
+            **/*.so
+            **/*.dylib
+            !target/**/deps/**
+            !target/**/incremental/**
+            !target/**/build/**
+          if-no-files-found: error
